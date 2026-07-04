@@ -93,13 +93,27 @@ const FILTER_FIELDS = [
   { key: 'milestoneName', label: 'Milestone name' },
 ];
 
+// Options for a given field are computed from projects matching every OTHER
+// active filter (dropdowns + date range), so picking Branch=HRBR narrows what
+// shows up in Designer/DM/Status/Stage/Milestone, and so on in every direction.
+// Any value already checked for this field is kept in the list even if it would
+// otherwise disappear, so the person can see and un-check it rather than it
+// silently vanishing.
+function getCascadedOptions(fieldKey) {
+  const f = Object.assign({}, FILTERS, { [fieldKey]: [] });
+  const subset = filterProjects(ALL_PROJECTS, f);
+  const opts = new Set(getUniqueValues(subset, fieldKey));
+  FILTERS[fieldKey].forEach(v => opts.add(v));
+  return Array.from(opts).sort();
+}
+
 function buildSidebar() {
   const sidebar = document.getElementById('sidebar');
   sidebar.innerHTML = '<h3>Filters</h3>';
   FILTER_FIELDS.forEach(f => {
-    const options = getUniqueValues(ALL_PROJECTS, f.key);
     const group = document.createElement('div');
     group.className = 'filter-group';
+    group.dataset.field = f.key;
     const btn = document.createElement('button');
     btn.className = 'filter-btn';
     btn.innerHTML = '<span>' + f.label + '</span>';
@@ -107,30 +121,6 @@ function buildSidebar() {
     const panel = document.createElement('div');
     panel.className = 'filter-panel';
     panel.style.display = 'none';
-
-    const actions = document.createElement('div');
-    actions.className = 'fp-actions';
-    actions.innerHTML = '<span data-act="all">Select all</span><span data-act="none">Clear</span>';
-    panel.appendChild(actions);
-    actions.querySelector('[data-act=all]').onclick = () => { FILTERS[f.key] = options.slice(); refreshFilterUI(); onFilterChange(); };
-    actions.querySelector('[data-act=none]').onclick = () => { FILTERS[f.key] = []; refreshFilterUI(); onFilterChange(); };
-
-    options.forEach(opt => {
-      const label = document.createElement('label');
-      const cb = document.createElement('input');
-      cb.type = 'checkbox';
-      cb.value = opt;
-      cb.checked = FILTERS[f.key].includes(opt);
-      cb.addEventListener('change', () => {
-        if (cb.checked) FILTERS[f.key].push(opt);
-        else FILTERS[f.key] = FILTERS[f.key].filter(v => v !== opt);
-        updateFilterBtnLabel(btn, f.label, FILTERS[f.key].length);
-        onFilterChange();
-      });
-      label.appendChild(cb);
-      label.appendChild(document.createTextNode(String(opt)));
-      panel.appendChild(label);
-    });
     group.appendChild(panel);
     btn.addEventListener('click', () => {
       const isOpen = panel.style.display === 'block';
@@ -139,6 +129,7 @@ function buildSidebar() {
     });
     sidebar.appendChild(group);
     updateFilterBtnLabel(btn, f.label, 0);
+    renderFilterOptions(f.key);
   });
 
   const dateGroup = document.createElement('div');
@@ -175,17 +166,49 @@ function updateFilterBtnLabel(btn, label, count) {
   btn.innerHTML = '<span>' + label + (count ? ' <span class="count">' + count + '</span>' : '') + '</span>';
 }
 
-function refreshFilterUI() {
-  document.querySelectorAll('.filter-group').forEach((group, i) => {
-    if (i >= FILTER_FIELDS.length) return;
-    const f = FILTER_FIELDS[i];
-    const btn = group.querySelector('.filter-btn');
-    updateFilterBtnLabel(btn, f.label, FILTERS[f.key].length);
-    group.querySelectorAll('input[type=checkbox]').forEach(cb => { cb.checked = FILTERS[f.key].includes(cb.value); });
+function renderFilterOptions(fieldKey) {
+  const f = FILTER_FIELDS.find(x => x.key === fieldKey);
+  const group = document.querySelector('.filter-group[data-field="' + fieldKey + '"]');
+  if (!f || !group) return;
+  const btn = group.querySelector('.filter-btn');
+  const panel = group.querySelector('.filter-panel');
+  const options = getCascadedOptions(fieldKey);
+
+  panel.innerHTML = '';
+  const actions = document.createElement('div');
+  actions.className = 'fp-actions';
+  actions.innerHTML = '<span data-act="all">Select all</span><span data-act="none">Clear</span>';
+  panel.appendChild(actions);
+  actions.querySelector('[data-act=all]').onclick = () => { FILTERS[fieldKey] = options.slice(); refreshFilterUI(); onFilterChange(); };
+  actions.querySelector('[data-act=none]').onclick = () => { FILTERS[fieldKey] = []; refreshFilterUI(); onFilterChange(); };
+
+  options.forEach(opt => {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.value = opt;
+    cb.checked = FILTERS[fieldKey].includes(opt);
+    cb.addEventListener('change', () => {
+      if (cb.checked) FILTERS[fieldKey].push(opt);
+      else FILTERS[fieldKey] = FILTERS[fieldKey].filter(v => v !== opt);
+      updateFilterBtnLabel(btn, f.label, FILTERS[fieldKey].length);
+      onFilterChange();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(String(opt)));
+    panel.appendChild(label);
   });
+  updateFilterBtnLabel(btn, f.label, FILTERS[fieldKey].length);
 }
 
-function onFilterChange() { renderAll(); }
+function refreshFilterUI() {
+  FILTER_FIELDS.forEach(f => renderFilterOptions(f.key));
+}
+
+function onFilterChange() {
+  refreshFilterUI();
+  renderAll();
+}
 
 // ---- Rendering ----
 function getFiltered() {
